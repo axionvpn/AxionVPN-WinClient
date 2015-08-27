@@ -1,0 +1,771 @@
+/*
+ *  OpenVPN-GUI -- A Windows GUI for OpenVPN.
+ *
+ *  Copyright (C) 2004 Mathias Sundman <mathias@nilings.se>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program (see the file COPYING included with this
+ *  distribution); if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
+#include <windows.h>
+#include <shlwapi.h>
+#include <wtsapi32.h>
+#include <prsht.h>
+#include <pbt.h>
+#include <winhttp.h>
+#include <commctrl.h>
+
+#include "tray.h"
+#include "openvpn.h"
+#include "openvpn_config.h"
+#include "viewlog.h"
+#include "service.h"
+#include "main.h"
+#include "options.h"
+#include "passphrase.h"
+#include "proxy.h"
+#include "registry.h"
+#include "openvpn-gui-res.h"
+#include "localization.h"
+#include "manage.h"
+#include "misc.h"
+#include "axion.h"
+#include "winsparkle.h"
+
+
+#define DEBUG
+#define DISABLE_CHANGE_PASSWORD
+#ifndef DISABLE_CHANGE_PASSWORD
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#endif
+
+
+
+#define MAX_POSTVARS_SIZE 4096
+unsigned char PostVars[MAX_POSTVARS_SIZE];
+
+/*  Declare Windows procedure  */
+LRESULT CALLBACK WindowProcedure (HWND, UINT, WPARAM, LPARAM);
+static void ShowSettingsDialog();
+void CloseApplication(HWND hwnd);
+
+/*  Class name and window title  */
+TCHAR szClassName[ ] = _T("AxionVPN-GUI");
+TCHAR szTitleText[ ] = _T("AxionVPN");
+
+/* Options structure */
+options_t o;
+
+
+/* Networks Window, the main one for the application*/
+HWND hNetworksWindow;
+
+static int
+VerifyAutoConnections()
+{
+    int i;
+    BOOL match;
+
+    for (i = 0; o.auto_connect[i] != 0 && i < MAX_CONFIGS; i++)
+    {
+        int j;
+        match = FALSE;
+        for (j = 0; j < MAX_CONFIGS; j++)
+        {
+            if (_tcsicmp(o.conn[j].config_file, o.auto_connect[i]) == 0)
+            {
+                match = TRUE;
+                break;
+            }
+        }
+        if (match == FALSE)
+        {
+            /* autostart config not found */
+            ShowLocalizedMsg(IDS_ERR_AUTOSTART_CONF, o.auto_connect[i]);
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+
+
+
+
+BOOL isWin64(VOID){
+	
+	SYSTEM_INFO lpSystemInfo;
+
+	GetSystemInfo(&lpSystemInfo);
+
+	if(lpSystemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ){
+		return TRUE;
+	}
+
+	return FALSE;
+
+}
+
+
+
+
+
+int WINAPI _tWinMain (HINSTANCE hThisInstance,
+                    UNUSED HINSTANCE hPrevInstance,
+                    UNUSED LPTSTR lpszArgument,
+                    UNUSED int nCmdShow)
+{
+  MSG messages;            /* Here messages to the application are saved */
+  WNDCLASSEX wincl;        /* Data structure for the windowclass */
+  DWORD shell32_version;
+
+  /* Initialize handlers for manangement interface notifications */
+  mgmt_rtmsg_handler handler[] = {
+      { ready,    OnReady },
+      { hold,     OnHold },
+      { log,      OnLogLine },
+      { state,    OnStateChange },
+      { password, OnPassword },
+      { proxy,    OnProxy },
+      { stop,     OnStop },
+      { 0,        NULL }
+  };
+  InitManagement(handler);
+
+  /* initialize options to default state */
+  InitOptions(&o);
+
+#ifdef DEBUG
+  /* Open debug file for output */
+  if (!(o.debug_fp = fopen(DEBUG_FILE, "w")))
+    {
+      /* can't open debug file */
+      ShowLocalizedMsg(IDS_ERR_OPEN_DEBUG_FILE, DEBUG_FILE);
+      exit(1);
+    }
+  PrintDebug(_T("Starting AxionVPN GUI v%S"), PACKAGE_VERSION);
+#endif
+
+
+  o.hInstance = hThisInstance;
+
+  if(!GetModuleHandle(_T("RICHED20.DLL")))
+    {
+      LoadLibrary(_T("RICHED20.DLL"));
+    }
+  else
+    {
+      /* can't load riched20.dll */
+      ShowLocalizedMsg(IDS_ERR_LOAD_RICHED20);
+      exit(1);
+    }
+
+  /* Check version of shell32.dll */
+  shell32_version=GetDllVersion(_T("shell32.dll"));
+  if (shell32_version < PACKVERSION(5,0))
+    {
+      /* shell32.dll version to low */
+      ShowLocalizedMsg(IDS_ERR_SHELL_DLL_VERSION, shell32_version);
+      exit(1);
+    }
+#ifdef DEBUG
+  PrintDebug(_T("Shell32.dll version: 0x%lx"), shell32_version);
+#endif
+
+
+  /* Parse command-line options */
+ //MIKE ProcessCommandLine(&o, GetCommandLine());
+
+
+  // Initialise common controls.
+  INITCOMMONCONTROLSEX icc;
+  icc.dwSize = sizeof(icc);
+  icc.dwICC = ICC_WIN95_CLASSES;
+  InitCommonControlsEx(&icc);
+
+
+
+  /* Check if a previous instance is already running. */
+  if ((FindWindow (szClassName, NULL)) != NULL)
+    {
+        /* GUI already running */
+        ShowLocalizedMsg(IDS_ERR_GUI_ALREADY_RUNNING);
+        exit(1);
+    }
+
+  if (!GetRegistryKeys()) {
+    exit(1);
+  }
+  if (!CheckVersion()) {
+    exit(1);
+  }
+  
+  if (!EnsureDirExists(o.log_dir))
+  {
+    ShowLocalizedMsg(IDS_ERR_CREATE_PATH, _T("log_dir"), o.log_dir);
+    exit(1);
+  }
+
+	WipeFileList();
+  //BuildFileList();
+  if (!VerifyAutoConnections()) {
+    exit(1);
+  }
+  GetProxyRegistrySettings();
+
+#ifndef DISABLE_CHANGE_PASSWORD
+  /* Initialize OpenSSL */
+  OpenSSL_add_all_algorithms();
+  ERR_load_crypto_strings();
+#endif
+
+  /* The Window structure */
+  wincl.hInstance = hThisInstance;
+  wincl.lpszClassName = szClassName;
+  wincl.lpfnWndProc = WindowProcedure;      /* This function is called by windows */
+  wincl.style = CS_DBLCLKS;                 /* Catch double-clicks */
+  wincl.cbSize = sizeof (WNDCLASSEX);
+
+  /* Use default icon and mouse-pointer */
+  wincl.hIcon = LoadLocalizedIcon(ID_ICO_APP);
+  wincl.hIconSm = LoadLocalizedIcon(ID_ICO_APP);
+  wincl.hCursor = LoadCursor (NULL, IDC_ARROW);
+  wincl.lpszMenuName = NULL;                 /* No menu */
+  wincl.cbClsExtra = 0;                      /* No extra bytes after the window class */
+  wincl.cbWndExtra = 0;                      /* structure or the window instance */
+  /* Use Windows's default color as the background of the window */
+  wincl.hbrBackground = (HBRUSH) COLOR_3DSHADOW; //COLOR_BACKGROUND;
+
+  /* Register the window class, and if it fails quit the program */
+  if (!RegisterClassEx (&wincl))
+    return 1;
+
+  /* The class is registered, let's create the program*/
+  HWND hMainWindow = CreateWindowEx(
+//  hNetworksWindow = CreateWindowEX(
+           0,                   /* Extended possibilites for variation */
+           szClassName,         /* Classname */
+           szTitleText,         /* Title Text */
+           WS_OVERLAPPEDWINDOW, /* default window */
+           (int)CW_USEDEFAULT,  /* Windows decides the position */
+           (int)CW_USEDEFAULT,  /* where the window ends up on the screen */
+           330,                 /* The programs width */
+           145,                 /* and height in pixels */
+           HWND_DESKTOP,        /* The window is a child-window to desktop */
+           NULL,                /* No menu */
+           hThisInstance,       /* Program Instance handler */
+           NULL                 /* No Window Creation data */
+           );
+
+   if (hMainWindow == NULL){
+	   MessageBox(NULL, _T("Failed to create AxionVPN Window"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
+	   return 0;
+	}
+
+
+	// Initialize WinSparkle as soon as the app itself is initialized, right
+// before entering the event loop:
+	win_sparkle_set_appcast_url("http://winsparkle.org/example/appcast.xml");
+	win_sparkle_init();
+
+	//Manually set the details so we can specify 32 or 64 bit
+
+	WCHAR toolName[32]={0};
+	WCHAR version[32]={0};
+
+	if(isWin64()){
+
+	  wsprintf(toolName,L"AxionVPN64.exe");
+	}else{
+		wsprintf(toolName,L"AxionVPN32.exe");
+	}
+	  PrintDebug(toolName);
+	 wsprintf(version,L"%S",PACKAGE_VERSION);
+	 PrintDebug(version);
+
+
+
+	win_sparkle_set_app_details(L"Axion",toolName,version);
+
+	win_sparkle_set_update_check_interval(3600 * 24);
+    win_sparkle_set_automatic_check_for_updates(1);
+
+	//Now actually check for an update
+	win_sparkle_check_update_with_ui();
+
+
+
+  /* Run the message loop. It will run until GetMessage() returns 0 */
+  while (GetMessage (&messages, NULL, 0, 0))
+  {
+    TranslateMessage(&messages);
+    DispatchMessage(&messages);
+  }
+
+  /* The program return-value is 0 - The value that PostQuitMessage() gave */
+  return messages.wParam;
+}
+
+
+static void
+StopAllOpenVPN()
+{
+    int i;
+
+    for (i = 0; i < o.num_configs; i++)
+    {
+        if (o.conn[i].state != disconnected)
+            StopOpenVPN(&o.conn[i]);
+    }
+
+    /* Wait for all connections to terminate (Max 5 sec) */
+    for (i = 0; i < 20; i++, Sleep(250))
+    {
+        if (CountConnState(disconnected) == o.num_configs)
+            break;
+    }
+}
+
+
+static int
+AutoStartConnections()
+{
+    int i;
+
+    for (i = 0; i < o.num_configs; i++)
+    {
+        if (o.conn[i].auto_connect)
+            StartOpenVPN(&o.conn[i]);
+    }
+
+    return TRUE;
+}
+
+
+static void
+ResumeConnections()
+{
+    int i;
+    for (i = 0; i < o.num_configs; i++) {
+        /* Restart suspend connections */
+        if (o.conn[i].state == suspended)
+            StartOpenVPN(&o.conn[i]);
+
+        /* If some connection never reached SUSPENDED state */
+        if (o.conn[i].state == suspending)
+            StopOpenVPN(&o.conn[i]);
+    }
+}
+
+
+/*  This function is called by the Windows function DispatchMessage()  */
+LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+  static UINT s_uTaskbarRestart;
+  int i;
+
+  switch (message) {
+    case WM_CREATE: 
+
+		PrintDebug(_T("[WindowsProcedure] got WM_CREATE"));
+
+      /* Save Window Handle */
+      o.hWnd = hwnd;
+
+      s_uTaskbarRestart = RegisterWindowMessage(TEXT("TaskbarCreated"));
+
+      WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
+
+      /* Load application icon */
+      HICON hIcon = LoadLocalizedIcon(ID_ICO_APP);
+      if (hIcon) {
+        SendMessage(hwnd, WM_SETICON, (WPARAM) (ICON_SMALL), (LPARAM) (hIcon));
+        SendMessage(hwnd, WM_SETICON, (WPARAM) (ICON_BIG), (LPARAM) (hIcon));
+      }
+
+      CreatePopupMenus();	/* Create popup menus */  
+      ShowTrayIcon();
+
+
+      if (o.allow_service[0]=='1' || o.service_only[0]=='1')
+        CheckServiceStatus();	// Check if service is running or not
+      if (!AutoStartConnections()) {
+        SendMessage(hwnd, WM_CLOSE, 0, 0);
+        break;
+      }
+
+	  //Now show the networks window
+	   ShowNetworksDialog();	
+
+      break;
+    	
+    case WM_NOTIFYICONTRAY:
+      OnNotifyTray(lParam); 	// Manages message from tray
+      break;
+
+    case WM_COMMAND:
+      if ( (LOWORD(wParam) >= IDM_CONNECTMENU) && (LOWORD(wParam) < IDM_CONNECTMENU + MAX_CONFIGS) ) {
+        StartOpenVPN(&o.conn[LOWORD(wParam) - IDM_CONNECTMENU]);
+      }
+      if ( (LOWORD(wParam) >= IDM_DISCONNECTMENU) && (LOWORD(wParam) < IDM_DISCONNECTMENU + MAX_CONFIGS) ) {
+        StopOpenVPN(&o.conn[LOWORD(wParam) - IDM_DISCONNECTMENU]);
+      }
+      if ( (LOWORD(wParam) >= IDM_STATUSMENU) && (LOWORD(wParam) < IDM_STATUSMENU + MAX_CONFIGS) ) {
+        ShowWindow(o.conn[LOWORD(wParam) - IDM_STATUSMENU].hwndStatus, SW_SHOW);
+      }
+      if ( (LOWORD(wParam) >= IDM_VIEWLOGMENU) && (LOWORD(wParam) < IDM_VIEWLOGMENU + MAX_CONFIGS) ) {
+        ViewLog(LOWORD(wParam) - IDM_VIEWLOGMENU);
+      }
+      if ( (LOWORD(wParam) >= IDM_EDITMENU) && (LOWORD(wParam) < IDM_EDITMENU + MAX_CONFIGS) ) {
+        EditConfig(LOWORD(wParam) - IDM_EDITMENU);
+      }
+#ifndef DISABLE_CHANGE_PASSWORD
+      if ( (LOWORD(wParam) >= IDM_PASSPHRASEMENU) && (LOWORD(wParam) < IDM_PASSPHRASEMENU + MAX_CONFIGS) ) {
+        ShowChangePassphraseDialog(&o.conn[LOWORD(wParam) - IDM_PASSPHRASEMENU]);
+      }
+#endif
+
+
+	  if (LOWORD(wParam) == IDM_NETWORKS) {
+
+		  
+		 // ShowWindow(hNetworksWindow, 1);
+		//  UpdateWindow(hNetworksWindow);
+
+		  ShowNetworksDialog();
+		  PrintDebug(_T("Networks Called"));
+	  }
+
+
+      if (LOWORD(wParam) == IDM_SETTINGS) {
+        ShowSettingsDialog();
+      }
+
+      if (LOWORD(wParam) == IDM_CLOSE) {
+		 PrintDebug(_T("[WindowsProcedure] got IDM_CLOSE"));
+        CloseApplication(hwnd);
+      }
+      if (LOWORD(wParam) == IDM_SERVICE_START) {
+        MyStartService();
+      }
+      if (LOWORD(wParam) == IDM_SERVICE_STOP) {
+        MyStopService();
+      }     
+      if (LOWORD(wParam) == IDM_SERVICE_RESTART) MyReStartService();
+      break;
+	    
+	//case WM_MINIMIZE:
+	 // PrintDebug(_T("[WindowsProcedure] got WM_MINIMIZE"));
+      //CloseApplication(hwnd);
+      //break;
+
+
+    case WM_CLOSE:
+	  PrintDebug(_T("[WindowsProcedure] got WM_CLOSE"));
+      CloseApplication(hwnd);
+      break;
+
+    case WM_DESTROY:
+      WTSUnRegisterSessionNotification(hwnd);
+      StopAllOpenVPN();	
+      OnDestroyTray();          /* Remove Tray Icon and destroy menus */
+      PostQuitMessage (0);	/* Send a WM_QUIT to the message queue */
+      break;
+
+    case WM_QUERYENDSESSION:
+      return(TRUE);
+
+    case WM_ENDSESSION:
+      StopAllOpenVPN();
+      OnDestroyTray();
+      break;
+
+    case WM_WTSSESSION_CHANGE:
+      switch (wParam) {
+        case WTS_SESSION_LOCK:
+          o.session_locked = TRUE;
+          break;
+        case WTS_SESSION_UNLOCK:
+          o.session_locked = FALSE;
+          if (CountConnState(suspended) != 0)
+            ResumeConnections();
+          break;
+      }
+      break;
+
+    case WM_POWERBROADCAST:
+      switch (wParam) {
+        case PBT_APMSUSPEND:
+          if (o.disconnect_on_suspend[0] == '1')
+            {
+              /* Suspend running connections */
+              for (i=0; i<o.num_configs; i++)
+                {
+                  if (o.conn[i].state == connected)
+                SuspendOpenVPN(i);
+                }
+
+              /* Wait for all connections to suspend */
+              for (i=0; i<10; i++, Sleep(500))
+                if (CountConnState(suspending) == 0) break;
+            }
+          return FALSE;
+
+        case PBT_APMRESUMESUSPEND:
+        case PBT_APMRESUMECRITICAL:
+          if (CountConnState(suspended) != 0 && !o.session_locked)
+            ResumeConnections();
+          return FALSE;
+      }
+
+    default:			/* for messages that we don't deal with */
+      if (message == s_uTaskbarRestart)
+        {
+          /* Explorer has restarted, re-register the tray icon. */
+          ShowTrayIcon();
+          CheckAndSetTrayIcon();
+          break;
+        }      
+      return DefWindowProc (hwnd, message, wParam, lParam);
+  }
+
+  return 0;
+}
+
+
+static INT_PTR CALLBACK
+AboutDialogFunc(UNUSED HWND hDlg, UINT msg, UNUSED WPARAM wParam, LPARAM lParam)
+{
+  LPPSHNOTIFY psn;
+  if (msg == WM_NOTIFY) {
+    psn = (LPPSHNOTIFY) lParam;
+    if (psn->hdr.code == (UINT) PSN_APPLY)
+        return TRUE;
+  }
+  return FALSE;
+}
+
+
+static void
+ShowSettingsDialog()
+{
+  PROPSHEETPAGE psp[4];
+  int page_number = 0;
+
+  /*  Account Information Tab */
+
+	  psp[page_number].dwSize = sizeof(PROPSHEETPAGE);
+	  psp[page_number].dwFlags = PSP_DLGINDIRECT;
+	  psp[page_number].hInstance = o.hInstance;
+	  psp[page_number].pResource = LocalizedDialogResource(ID_DLG_AUTH_SAVE);
+	  psp[page_number].pfnDlgProc = AxionAuthDialogFunc;
+	  psp[page_number].lParam = 0;
+	  psp[page_number].pfnCallback = NULL;
+	  ++page_number;
+
+
+  /* Proxy tab */
+  if (o.allow_proxy[0] == '1' && o.service_only[0] == '0') {
+    psp[page_number].dwSize = sizeof(PROPSHEETPAGE);
+    psp[page_number].dwFlags = PSP_DLGINDIRECT;
+    psp[page_number].hInstance = o.hInstance;
+    psp[page_number].pResource = LocalizedDialogResource(ID_DLG_PROXY);
+    psp[page_number].pfnDlgProc = ProxySettingsDialogFunc;
+    psp[page_number].lParam = 0;
+    psp[page_number].pfnCallback = NULL;
+    ++page_number;
+  }
+
+  /* General tab */
+  psp[page_number].dwSize = sizeof(PROPSHEETPAGE);
+  psp[page_number].dwFlags = PSP_DLGINDIRECT;
+  psp[page_number].hInstance = o.hInstance;
+  psp[page_number].pResource = LocalizedDialogResource(ID_DLG_GENERAL);
+  psp[page_number].pfnDlgProc = LanguageSettingsDlgProc;
+  psp[page_number].lParam = 0;
+  psp[page_number].pfnCallback = NULL;
+  ++page_number;
+
+  /* About tab */
+  psp[page_number].dwSize = sizeof(PROPSHEETPAGE);
+  psp[page_number].dwFlags = PSP_DLGINDIRECT;
+  psp[page_number].hInstance = o.hInstance;
+  psp[page_number].pResource = LocalizedDialogResource(ID_DLG_ABOUT);
+  psp[page_number].pfnDlgProc = AboutDialogFunc;
+  psp[page_number].lParam = 0;
+  psp[page_number].pfnCallback = NULL;
+  ++page_number;
+
+
+
+  PROPSHEETHEADER psh;
+  psh.dwSize = sizeof(PROPSHEETHEADER);
+  psh.dwFlags = PSH_USEHICON | PSH_PROPSHEETPAGE | PSH_NOAPPLYNOW | PSH_NOCONTEXTHELP;
+  psh.hwndParent = o.hWnd;
+  psh.hInstance = o.hInstance;
+  psh.hIcon = LoadLocalizedIcon(ID_ICO_APP);
+  psh.pszCaption = LoadLocalizedString(IDS_SETTINGS_CAPTION);
+  psh.nPages = page_number;
+  psh.nStartPage = 0;
+  psh.ppsp = (LPCPROPSHEETPAGE) &psp;
+  psh.pfnCallback = NULL;
+
+  PropertySheet(&psh);
+}
+
+
+
+void
+CloseApplication(HWND hwnd)
+{
+    int i;
+
+    if (o.service_state == service_connected
+    && ShowLocalizedMsgEx(MB_YESNO, _T("Exit AxionVPN"), IDS_NFO_SERVICE_ACTIVE_EXIT) == IDNO)
+            return;
+
+    for (i = 0; i < o.num_configs; i++)
+    {
+        if (o.conn[i].state == disconnected)
+            continue;
+
+        /* Ask for confirmation if still connected */
+        if (ShowLocalizedMsgEx(MB_YESNO, _T("Exit AxionVPN"), IDS_NFO_ACTIVE_CONN_EXIT) == IDNO)
+            return;
+    }
+
+	WipeFileList();
+    DestroyWindow(hwnd);
+
+	win_sparkle_cleanup();
+}
+
+#ifdef DEBUG
+void PrintDebugMsg(TCHAR *msg)
+{
+  time_t log_time;
+  struct tm *time_struct;
+  TCHAR date[30];
+
+  log_time = time(NULL);
+  time_struct = localtime(&log_time);
+  _sntprintf(date, _countof(date), _T("%d-%.2d-%.2d %.2d:%.2d:%.2d"),
+                 time_struct->tm_year + 1900,
+                 time_struct->tm_mon + 1,
+                 time_struct->tm_mday,
+                 time_struct->tm_hour,
+                 time_struct->tm_min,
+                 time_struct->tm_sec);
+
+  _ftprintf(o.debug_fp, _T("%s %s\n"), date, msg);
+  fflush(o.debug_fp);
+}
+
+void PrintErrorDebug(TCHAR *msg)
+{
+  LPVOID lpMsgBuf;
+  TCHAR *buf;
+
+  /* Get last error message */
+  if (!FormatMessage( 
+          FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+          FORMAT_MESSAGE_FROM_SYSTEM | 
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+          NULL,
+          GetLastError(),
+          MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+          (LPTSTR) &lpMsgBuf,
+          0,
+          NULL ))
+    {
+      /* FormatMessage failed! */
+      PrintDebug(_T("FormatMessage() failed. %s "), msg);
+      return;
+    }
+
+  /* Cut of CR/LFs */
+  buf = (TCHAR *)lpMsgBuf;
+  buf[_tcslen(buf) - 3] = '\0';
+
+  PrintDebug(_T("%s %s"), msg, (LPCTSTR)lpMsgBuf);
+
+  LocalFree(lpMsgBuf);
+
+}
+#endif
+
+bool
+init_security_attributes_allow_all (struct security_attributes *obj)
+{
+  CLEAR (*obj);
+
+  obj->sa.nLength = sizeof (SECURITY_ATTRIBUTES);
+  obj->sa.lpSecurityDescriptor = &obj->sd;
+  obj->sa.bInheritHandle = FALSE;
+  if (!InitializeSecurityDescriptor (&obj->sd, SECURITY_DESCRIPTOR_REVISION))
+    return false;
+  if (!SetSecurityDescriptorDacl (&obj->sd, TRUE, NULL, FALSE))
+    return false;
+  return true;
+}
+
+#define PACKVERSION(major,minor) MAKELONG(minor,major)
+DWORD GetDllVersion(LPCTSTR lpszDllName)
+{
+    HINSTANCE hinstDll;
+    DWORD dwVersion = 0;
+
+    /* For security purposes, LoadLibrary should be provided with a 
+       fully-qualified path to the DLL. The lpszDllName variable should be
+       tested to ensure that it is a fully qualified path before it is used. */
+    hinstDll = LoadLibrary(lpszDllName);
+	
+    if(hinstDll)
+    {
+        DLLGETVERSIONPROC pDllGetVersion;
+        pDllGetVersion = (DLLGETVERSIONPROC)GetProcAddress(hinstDll, 
+                          "DllGetVersion");
+
+        /* Because some DLLs might not implement this function, you
+        must test for it explicitly. Depending on the particular 
+        DLL, the lack of a DllGetVersion function can be a useful
+        indicator of the version. */
+
+        if(pDllGetVersion)
+        {
+            DLLVERSIONINFO dvi;
+            HRESULT hr;
+
+            ZeroMemory(&dvi, sizeof(dvi));
+            dvi.cbSize = sizeof(dvi);
+
+            hr = (*pDllGetVersion)(&dvi);
+
+            if(SUCCEEDED(hr))
+            {
+               dwVersion = PACKVERSION(dvi.dwMajorVersion, dvi.dwMinorVersion);
+            }
+        }
+
+        FreeLibrary(hinstDll);
+    }
+    return dwVersion;
+}
