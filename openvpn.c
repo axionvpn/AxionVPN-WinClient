@@ -47,6 +47,7 @@
 #include "localization.h"
 #include "misc.h"
 #include "registry.h"
+#include "axion.h"
 
 #define WM_OVPN_STOP    (WM_APP + 10)
 #define WM_OVPN_SUSPEND (WM_APP + 11)
@@ -58,12 +59,16 @@ const TCHAR *cfgProp = _T("conn");
 #define MAX_CRED_LENGTH
 
 
+
+
+
+
 void ClearCreds(HWND hwndDlg){
 	HKEY regkey;
 	DWORD dwDispos;
 
 
-	PrintDebug(_T("[ClearCreds] Called!"));
+	//PrintDebug(_T("[ClearCreds] Called!"));
 
 	SetDlgItemText(hwndDlg, ID_EDT_AUTH_USER, NULL);
 	SetDlgItemText(hwndDlg, ID_EDT_AUTH_PASS, NULL);
@@ -90,7 +95,7 @@ void SaveCreds(LPTSTR userName, LPTSTR password){
 	HKEY regkey;
 	DWORD dwDispos;
 
-	PrintDebug(_T("[SaveCreds] Called with: %S and %S"), userName,password);
+	//PrintDebug(_T("[SaveCreds] Called with: %S and %S"), userName,password);
 	
 	/* Open Registry for writing */
 	if (RegCreateKeyEx(HKEY_CURRENT_USER, GUI_REGKEY_HKCU, 0, _T(""), REG_OPTION_NON_VOLATILE,
@@ -128,13 +133,13 @@ void LoadCreds(HWND hwndDlg){
 	/* get registry settings */
 	memset(tmpBuf,0,sizeof(CHAR) * 64);
 	GetRegistryValueBin(regkey, _T("UserName"), tmpBuf, 64);
-	PrintDebug(L"[LoadCreds] username: %S", tmpBuf);
+	//PrintDebug(L"[LoadCreds] username: %S", tmpBuf);
 	SetDlgItemTextA(hwndDlg, ID_EDT_AUTH_USER, tmpBuf);
 
 
 	memset(tmpBuf,0,sizeof(CHAR) * 64);
 	GetRegistryValueBin(regkey, _T("password"), tmpBuf, 64);
-	PrintDebug(L"[LoadCreds] password: %S", tmpBuf);
+	//PrintDebug(L"[LoadCreds] password: %S", tmpBuf);
 	SetDlgItemTextA(hwndDlg, ID_EDT_AUTH_PASS, tmpBuf);
 
 
@@ -189,8 +194,8 @@ AxionAuthDialogPopupFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			GetDlgItemTextUtf8(hwndDlg, ID_EDT_AUTH_USER, &userName, &userNameLen);
 			GetDlgItemTextUtf8(hwndDlg, ID_EDT_AUTH_PASS, &password, &passwordLen);
 
-			PrintDebug(_T("Username: %S"), userName);
-			PrintDebug(_T("Password: %S"), password);
+			//PrintDebug(_T("[AxionAuthDialogPopupFunc] Username: %S"), userName);
+			//PrintDebug(_T("[AxoinAuthDialogPopupFunc] Password: %S"), password);
 
 			//Save the contents in Protected storage
 			SaveCreds(userName, password);
@@ -219,7 +224,7 @@ AxionAuthDialogPopupFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				PNMLINK pNMLink = (PNMLINK)lParam;
 				LITEM   item    = pNMLink->item;
 				ShellExecute(NULL, L"open", L"www.axionvpn.com/lostpw", NULL, NULL, SW_SHOW);
-				PrintDebug(_T("item.szUrl: %S"), item.szUrl);
+				//PrintDebug(_T("item.szUrl: %S"), item.szUrl);
 
 				break;
 			}
@@ -294,8 +299,8 @@ AxionAuthDialogFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			GetDlgItemTextUtf8(hwndDlg, ID_EDT_AUTH_USER,&userName,&userNameLen);
 			GetDlgItemTextUtf8(hwndDlg, ID_EDT_AUTH_PASS, &password, &passwordLen);
 
-			PrintDebug(_T("Username: %S"), userName);
-			PrintDebug(_T("Password: %S"), password);
+			//PrintDebug(_T("Username: %S"), userName);
+			//PrintDebug(_T("Password: %S"), password);
 
 			//Save the contents in Protected storage
 			SaveCreds(userName,password);
@@ -328,7 +333,7 @@ AxionAuthDialogFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				PNMLINK pNMLink = (PNMLINK)lParam;
 				LITEM   item    = pNMLink->item;
 				ShellExecute(NULL, L"open", L"www.axionvpn.com/lostpw", NULL, NULL, SW_SHOW);
-				PrintDebug(_T("item.szUrl: %S"), item.szUrl);
+				//PrintDebug(_T("item.szUrl: %S"), item.szUrl);
 
 				break;
 			}
@@ -418,6 +423,71 @@ OnLogLine(connection_t *c, char *line)
 }
 
 
+
+static DWORD WINAPI
+GetAxionAcctStatus(void *p){
+
+	int retries = 0;
+	char *connInfo = NULL;
+
+	connection_t *c = (connection_t *) p;
+
+	if(c == NULL){
+		return 0;
+	}
+
+	while (1){
+	  
+	  //Get the remote connection info
+	  connInfo = GetConnInfo(c->username, c->password);
+	 
+	  if(connInfo){
+		  break;
+	  }else{
+		  if(retries++ > 5){
+			  break;
+		  }else{
+		    continue;
+		  }
+	  }
+	}
+
+
+		//Set the config info in the options
+		  SetConnInfo(connInfo);
+	
+           /* Show connection tray balloon */
+        if ((c->state == connecting   && o.show_balloon[0] != '0')
+        ||  (c->state == resuming     && o.show_balloon[0] != '0')
+        ||  (c->state == reconnecting && o.show_balloon[0] == '2')
+		||	(c->state == connected) )
+        {
+			TCHAR title[256];
+			TCHAR acctStr[128];
+			TCHAR msg[512];
+			LoadLocalizedStringBuf(acctStr, _countof(acctStr),IDS_NFO_ACCOUNT_TYPE);
+            LoadLocalizedStringBuf(title, _countof(title), IDS_NFO_NOW_CONNECTED, c->config_name);
+			swprintf(msg, 512, L"%s %S\n%s %S",acctStr,c->acctType, LoadLocalizedString(IDS_NFO_REMOTE_IP), c->pubIP);
+			ShowTrayBalloon(title, msg);
+        }
+
+
+		SetTrayIcon(connected);
+
+		//Create the full status buffer string
+		WCHAR StatusStr[512];
+		memset(StatusStr,0,512 * sizeof(WCHAR));
+		swprintf(StatusStr,512,L"%s \tRemote IP: %S \tAccount Type: %S",LoadLocalizedString(IDS_NFO_STATE_CONNECTED),c->pubIP,c->acctType);
+
+       // SetDlgItemText(c->hwndStatus, ID_TXT_STATUS, LoadLocalizedString(IDS_NFO_STATE_CONNECTED));]
+		SetDlgItemText(c->hwndStatus,ID_TXT_STATUS,StatusStr);
+        SetStatusWinIcon(c->hwndStatus, disconnected_icon_num);
+
+	//PrintDebug(L"[AxionAcctStatus] Returning\n");
+
+	return 0;
+}
+
 /*
  * Handle a state change notification from the OpenVPN management interface
  * Format <TIMESTAMP>,<STATE>,[<MESSAGE>],[<LOCAL_IP>][,<REMOTE_IP>]
@@ -460,13 +530,23 @@ OnStateChange(connection_t *c, char *data)
         MultiByteToWideChar(CP_ACP, 0, local_ip, -1, c->ip, _countof(c->ip));
 
 
+		//SetConnInfo(NULL);
+
+
+
+		//Status thread
+		CreateThread(NULL, 0, GetAxionAcctStatus, c, 0, NULL);
+
+/*
 		//Get the remote connection info
 		  char *connInfo = GetConnInfo(c->username, c->password);
 
 		//Set the config info in the options
 		  SetConnInfo(connInfo);
 
-        /* Show connection tray balloon */
+
+
+        // Show connection tray balloon
         if ((c->state == connecting   && o.show_balloon[0] != '0')
         ||  (c->state == resuming     && o.show_balloon[0] != '0')
         ||  (c->state == reconnecting && o.show_balloon[0] == '2'))
@@ -479,7 +559,7 @@ OnStateChange(connection_t *c, char *data)
 			swprintf(msg, 512, L"%s %S\n%s %S",acctStr,c->acctType, LoadLocalizedString(IDS_NFO_REMOTE_IP), c->pubIP);
 			ShowTrayBalloon(title, msg);
         }
-
+*/
 
         /* Save time when we got connected. */
         c->connected_since = atoi(data);
@@ -487,16 +567,16 @@ OnStateChange(connection_t *c, char *data)
         c->state = connected;
 
         SetMenuStatus(c, connected);
-        SetTrayIcon(connected);
+       // SetTrayIcon(connected);
 
 		//Create the full status buffer string
-		WCHAR StatusStr[512];
-		memset(StatusStr,0,512 * sizeof(WCHAR));
-		swprintf(StatusStr,512,L"%s \tRemote IP: %S \tAccount Type: %S",LoadLocalizedString(IDS_NFO_STATE_CONNECTED),c->pubIP,c->acctType);
+		//WCHAR StatusStr[512];
+		//memset(StatusStr,0,512 * sizeof(WCHAR));
+		//swprintf(StatusStr,512,L"%s \tRemote IP: %S \tAccount Type: %S",LoadLocalizedString(IDS_NFO_STATE_CONNECTED),c->pubIP,c->acctType);
 
        // SetDlgItemText(c->hwndStatus, ID_TXT_STATUS, LoadLocalizedString(IDS_NFO_STATE_CONNECTED));]
-		SetDlgItemText(c->hwndStatus,ID_TXT_STATUS,StatusStr);
-        SetStatusWinIcon(c->hwndStatus, ID_ICO_CONNECTED);
+		//SetDlgItemText(c->hwndStatus,ID_TXT_STATUS,StatusStr);
+        SetStatusWinIcon(c->hwndStatus, disconnected_icon_num);
 
         /* Hide Status Window */
         ShowWindow(c->hwndStatus, SW_HIDE);
@@ -514,7 +594,7 @@ OnStateChange(connection_t *c, char *data)
         CheckAndSetTrayIcon();
 
         SetDlgItemText(c->hwndStatus, ID_TXT_STATUS, LoadLocalizedString(IDS_NFO_STATE_RECONNECTING));
-        SetStatusWinIcon(c->hwndStatus, ID_ICO_CONNECTING);
+        SetStatusWinIcon(c->hwndStatus, connecting_icon_num);
     }
 }
 
@@ -669,7 +749,7 @@ OnStop(connection_t *c, UNUSED char *msg)
         c->state = disconnected;
         CheckAndSetTrayIcon();
         SetDlgItemText(c->hwndStatus, ID_TXT_STATUS, LoadLocalizedString(IDS_NFO_STATE_DISCONNECTED));
-        SetStatusWinIcon(c->hwndStatus, ID_ICO_DISCONNECTED);
+        SetStatusWinIcon(c->hwndStatus, disconnected_icon_num);
         EnableWindow(GetDlgItem(c->hwndStatus, ID_DISCONNECT), FALSE);
         EnableWindow(GetDlgItem(c->hwndStatus, ID_RESTART), FALSE);
         if (o.silent_connection[0] == '0')
@@ -693,7 +773,7 @@ OnStop(connection_t *c, UNUSED char *msg)
         c->state = disconnected;
         EnableWindow(GetDlgItem(c->hwndStatus, ID_DISCONNECT), FALSE);
         EnableWindow(GetDlgItem(c->hwndStatus, ID_RESTART), FALSE);
-        SetStatusWinIcon(c->hwndStatus, ID_ICO_DISCONNECTED);
+        SetStatusWinIcon(c->hwndStatus, disconnected_icon_num);
         SetDlgItemText(c->hwndStatus, ID_TXT_STATUS, LoadLocalizedString(txt_id));
         if (o.silent_connection[0] == '0')
         {
@@ -757,8 +837,8 @@ StatusDialogFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_INITDIALOG:
         c = (connection_t *) lParam;
 
-        /* Set window icon "disconnected" */
-        SetStatusWinIcon(hwndDlg, ID_ICO_CONNECTING);
+        /* Set window icon "connecting" */
+        SetStatusWinIcon(hwndDlg, connecting_icon_num);
 
         /* Set connection for this dialog */
         SetProp(hwndDlg, cfgProp, (HANDLE) c);
@@ -1002,7 +1082,7 @@ StartOpenVPN(connection_t *c)
 
     /* Construct command line */
     _sntprintf_0(cmdline, _T("openvpn "
-        "--config \"%s\" --service %s 0 --log%s \"%s\" --auth-retry interact "
+        "--block-outside-dns --config \"%s\" --service %s 0 --log%s \"%s\" --auth-retry interact "
         "--management %S %hd stdin --management-query-passwords %s"
         "--management-hold"), c->config_file, exit_event_name,
         (o.append_string[0] == '1' ? _T("-append") : _T("")), c->log_path,
@@ -1150,7 +1230,7 @@ StopOpenVPN(connection_t *c)
 	  //if(hThread){
 		//  waitTime = INFINITE;
 	  //}else{
-		//  PrintDebug(L"[StopOpenVPN] Coudn't get Thread handle\n");
+		//  //PrintDebug(L"[StopOpenVPN] Coudn't get Thread handle\n");
 	 // }
 
 	//Stop the openVPN thread
@@ -1164,7 +1244,7 @@ StopOpenVPN(connection_t *c)
 	_sntprintf_0(outpath, _T("%s\\%s"), o.config_dir, c->config_file);
 	DeleteFile(outpath);
 
-	PrintDebug(L"Need to delete %s\n", outpath);
+	//PrintDebug(L"Need to delete %s\n", outpath);
 
 
 
@@ -1305,7 +1385,7 @@ CheckVersion()
     else if (ReadLineFromStdOut(hStdOutRead, line, sizeof(line)))
     {
 #ifdef DEBUG
-        PrintDebug(_T("VersionString: %S"), line);
+        //PrintDebug(_T("VersionString: %S"), line);
 #endif
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);

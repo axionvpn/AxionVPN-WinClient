@@ -30,7 +30,7 @@ typedef struct connection connection_t;
 #include <stdio.h>
 #include <time.h>
 
-#define DEBUG
+//#define DEBUG
 
 #include "manage.h"
 

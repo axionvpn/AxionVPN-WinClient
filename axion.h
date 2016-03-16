@@ -95,4 +95,10 @@ void CreateNetworksWindow(void);
 
 void ShowNetworksDialog();
 
+
+
+
+INT_PTR CALLBACK
+BasicVPNDialogFunc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
 #endif

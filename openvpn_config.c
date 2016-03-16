@@ -26,7 +26,7 @@
 
 #include <windows.h>
 
-#define DEBUG
+//#define DEBUG
 
 #include "main.h"
 #include "openvpn-gui-res.h"
@@ -129,7 +129,7 @@ BuildFileList()
     {
         if (o.num_configs >= MAX_CONFIGS)
         {
-			PrintDebug(L"[BuildFileList] There are %d configs\n",o.num_configs);
+			//PrintDebug(L"[BuildFileList] There are %d configs\n",o.num_configs);
 			//MessageBox(NULL, _T("Many Configs 01"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
            // ShowLocalizedMsg(IDS_ERR_MANY_CONFIGS, MAX_CONFIGS);
             break;

@@ -253,7 +253,7 @@ ShowTrayIcon()
   ni.hWnd = o.hWnd;
   ni.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
   ni.uCallbackMessage = WM_NOTIFYICONTRAY;
-  ni.hIcon = LoadLocalizedIcon(ID_ICO_DISCONNECTED);
+  ni.hIcon = LoadLocalizedIcon(disconnected_icon_num);
   _tcsncpy(ni.szTip, LoadLocalizedString(IDS_TIP_DEFAULT), _countof(ni.szTip));
 
   Shell_NotifyIcon(NIM_ADD, &ni);
@@ -326,15 +326,15 @@ SetTrayIcon(conn_state_t state)
 		memset(remoteIP, 0, 64 * sizeof(WCHAR));
 		swprintf(remoteIP, 64, L"\n%s %S", LoadLocalizedString(IDS_NFO_REMOTE_IP), o.conn[config].pubIP);
 		_tcsncat(msg, remoteIP, _countof(msg) - _tcslen(msg) - 1);
-		PrintDebug(L"[SetTrayIcon] msg: %s\n",msg);
+		//PrintDebug(L"[SetTrayIcon] msg: %s\n",msg);
 
     }
 
-    icon_id = ID_ICO_CONNECTING;
+    icon_id = connecting_icon_num;
     if (state == connected)
-        icon_id = ID_ICO_CONNECTED;
+        icon_id = connected_icon_num;
     else if (state == disconnected)
-        icon_id = ID_ICO_DISCONNECTED;
+        icon_id = disconnected_icon_num;
 
     ni.cbSize = sizeof(ni);
     ni.uID = 0;

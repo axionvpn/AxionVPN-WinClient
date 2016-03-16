@@ -104,7 +104,7 @@ __snprintf_0(char *buf, size_t size, char *format, ...)
 /* Print Debug Message */
 #define PrintDebug(...) \
         { \
-           TCHAR x_msg[256]; \
+           TCHAR x_msg[1024]; \
            _sntprintf_0(x_msg, __VA_ARGS__); \
            PrintDebugMsg(x_msg); \
         }
@@ -115,5 +115,10 @@ bool init_security_attributes_allow_all (struct security_attributes *obj);
 #endif
 
 DWORD GetDllVersion(LPCTSTR lpszDllName);
+
+extern int disconnected_icon_num;
+extern int connecting_icon_num;
+extern int connected_icon_num;
+
 
 #endif

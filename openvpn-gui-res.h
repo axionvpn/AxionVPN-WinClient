@@ -28,6 +28,10 @@
 #define ID_ICO_CONNECTING                 92
 #define ID_ICO_DISCONNECTED               93
 
+#define ID_ICO_CONNECTED_WIN10            94
+#define ID_ICO_CONNECTING_WIN10           95
+#define ID_ICO_DISCONNECTED_WIN10         96
+
 /* About Dialog */
 #define ID_DLG_ABOUT                     100
 
@@ -56,6 +60,9 @@
 #define ID_EDT_AUTH_USER                 181
 #define ID_EDT_AUTH_PASS                 182
 #define ID_DLG_AUTH_SAVE				 183
+
+//Basic Account
+#define ID_DLG_ACCT_BASIC				 190	
 
 /* Proxy Settings Dialog */
 #define ID_DLG_PROXY                     200

@@ -30,7 +30,7 @@
 #include <tchar.h>
 #include <shlobj.h>
 
-#define DEBUG
+//#define DEBUG
 
 
 #include "main.h"
@@ -308,7 +308,7 @@ SetRegistryValueNumeric(HKEY regkey, const TCHAR *name, DWORD data)
 //
 int SetRegistryValueBin(HKEY regkey, const WCHAR *name, const void *data, DWORD size)
 {
-	PrintDebug(L"[SetRegistryValueBin] Called with %S of size %d",data,size);
+	//PrintDebug(L"[SetRegistryValueBin] Called with %S of size %d",data,size);
 
 	DATA_BLOB DataIn;
 	DATA_BLOB DataOut;
@@ -373,21 +373,21 @@ LONG GetRegistryValueBin(HKEY regkey, const WCHAR *name, void *data, DWORD len)
   void *tmpData = NULL;
 
 	
-  PrintDebug(L"[GetRegistryValueBin] Called");
+  //PrintDebug(L"[GetRegistryValueBin] Called");
 
 
   //See how many bytes we need
   status = RegQueryValueEx(regkey, name, NULL, &type, NULL, &dwBytesNeeded);
   if (status != ERROR_SUCCESS || dwBytesNeeded == 0){
-     PrintDebug(L"[GetRegistryValueBin] Query failed or needed no bytes");
+     //PrintDebug(L"[GetRegistryValueBin] Query failed or needed no bytes");
 	 goto exit;
   }
 
   //Allocate on the heap the Bytes we need into a temporarary heap space
-  PrintDebug(L"[GetRegistryValueBin] Size needed is %d",dwBytesNeeded);
+  //PrintDebug(L"[GetRegistryValueBin] Size needed is %d",dwBytesNeeded);
   tmpData = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,dwBytesNeeded);
   if(tmpData == NULL){
-	PrintDebug(L"[GetRegistryValueBin] Failed to allocate memory");
+	//PrintDebug(L"[GetRegistryValueBin] Failed to allocate memory");
 	goto exit;
   }
 
@@ -395,7 +395,7 @@ LONG GetRegistryValueBin(HKEY regkey, const WCHAR *name, void *data, DWORD len)
   //Now really query for our Data.
   status = RegQueryValueEx(regkey, name, NULL, &type, (byte *) tmpData, &dwBytesNeeded);
     if (status != ERROR_SUCCESS || dwBytesNeeded == 0){
-     PrintDebug(L"[GetRegistryValueBin] Second query failed");
+     //PrintDebug(L"[GetRegistryValueBin] Second query failed");
 	 goto exit;
   }
 
@@ -417,13 +417,13 @@ LONG GetRegistryValueBin(HKEY regkey, const WCHAR *name, void *data, DWORD len)
 	 memset(data,0,len);
      memcpy(data,DataOut.pbData,DataOut.cbData);
 	 dwRetVal = DataOut.cbData;
-	 PrintDebug(L"[GetRegistryValueBin] Decrypted data len is: %d\n",DataOut.cbData);
-	 PrintDebug(L"[GetRegistryValueBin] The decrypted data is: %S\n", data);
+	 //PrintDebug(L"[GetRegistryValueBin] Decrypted data len is: %d\n",DataOut.cbData);
+	 //PrintDebug(L"[GetRegistryValueBin] The decrypted data is: %S\n", data);
  
 }
 else
 {
-    PrintDebug("Decryption error!");
+    //PrintDebug("Decryption error!");
 }
 
 

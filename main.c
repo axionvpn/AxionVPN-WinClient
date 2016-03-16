@@ -31,6 +31,7 @@
 #include <winhttp.h>
 #include <commctrl.h>
 
+
 #include "tray.h"
 #include "openvpn.h"
 #include "openvpn_config.h"
@@ -47,16 +48,18 @@
 #include "misc.h"
 #include "axion.h"
 #include "winsparkle.h"
+//#include "versionhelpers.h"
 
-
-#define DEBUG
+//#define DEBUG
 #define DISABLE_CHANGE_PASSWORD
 #ifndef DISABLE_CHANGE_PASSWORD
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #endif
 
-
+int disconnected_icon_num;
+int connecting_icon_num;
+int connected_icon_num;
 
 #define MAX_POSTVARS_SIZE 4096
 unsigned char PostVars[MAX_POSTVARS_SIZE];
@@ -76,6 +79,65 @@ options_t o;
 
 /* Networks Window, the main one for the application*/
 HWND hNetworksWindow;
+
+typedef DWORD(* fnRtlGetVersion )(PRTL_OSVERSIONINFOW lpVersionInformation);
+
+bool IsWindowsVersionOrGreater(WORD wMajorVersion, WORD wMinorVersion, WORD wServicePackMajor)
+{
+
+
+    RTL_OSVERSIONINFOEXW verInfo = { 0 };
+    verInfo.dwOSVersionInfoSize = sizeof( verInfo );
+
+	fnRtlGetVersion RtlGetVersion = NULL;
+    RtlGetVersion = (fnRtlGetVersion)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ), "RtlGetVersion" );
+
+    if (RtlGetVersion != 0 && RtlGetVersion( (PRTL_OSVERSIONINFOW)&verInfo ) == 0)
+    {
+        if (verInfo.dwMajorVersion > wMajorVersion)
+            return true;
+        else if (verInfo.dwMajorVersion < wMajorVersion)
+            return false;
+
+        if (verInfo.dwMinorVersion > wMinorVersion)
+            return true;
+        else if (verInfo.dwMinorVersion < wMinorVersion)
+            return false;
+
+        if (verInfo.wServicePackMajor >= wServicePackMajor)
+            return true;
+    }
+
+    return false;
+}
+
+
+
+//
+// Detect the version of Windows we're running and set the global icons
+//
+void SetIcons( void )
+{
+
+	//default icons
+	connecting_icon_num = ID_ICO_CONNECTING;
+	connected_icon_num = ID_ICO_CONNECTED;
+	disconnected_icon_num = ID_ICO_DISCONNECTED;
+
+
+  //To be Windows 10 we must match
+  if(IsWindowsVersionOrGreater(10,0,0)){
+
+	//PrintDebug(_T("Windows 10"));
+	connecting_icon_num = ID_ICO_CONNECTING_WIN10;
+	connected_icon_num = ID_ICO_CONNECTED_WIN10;
+	disconnected_icon_num = ID_ICO_DISCONNECTED_WIN10;
+  }else{
+	  //PrintDebug(_T("Less than Windows 10"));
+  }
+
+
+}
 
 static int
 VerifyAutoConnections()
@@ -161,7 +223,7 @@ int WINAPI _tWinMain (HINSTANCE hThisInstance,
       ShowLocalizedMsg(IDS_ERR_OPEN_DEBUG_FILE, DEBUG_FILE);
       exit(1);
     }
-  PrintDebug(_T("Starting AxionVPN GUI v%S"), PACKAGE_VERSION);
+  //PrintDebug(_T("Starting AxionVPN GUI v%S"), PACKAGE_VERSION);
 #endif
 
 
@@ -187,12 +249,12 @@ int WINAPI _tWinMain (HINSTANCE hThisInstance,
       exit(1);
     }
 #ifdef DEBUG
-  PrintDebug(_T("Shell32.dll version: 0x%lx"), shell32_version);
+  //PrintDebug(_T("Shell32.dll version: 0x%lx"), shell32_version);
 #endif
 
 
-  /* Parse command-line options */
- //MIKE ProcessCommandLine(&o, GetCommandLine());
+  //Set the icons
+  SetIcons();
 
 
   // Initialise common controls.
@@ -202,12 +264,11 @@ int WINAPI _tWinMain (HINSTANCE hThisInstance,
   InitCommonControlsEx(&icc);
 
 
-
+  HWND hAxionWindow = FindWindow(szClassName,NULL);
   /* Check if a previous instance is already running. */
-  if ((FindWindow (szClassName, NULL)) != NULL)
+  if (hAxionWindow != NULL)
     {
-        /* GUI already running */
-        ShowLocalizedMsg(IDS_ERR_GUI_ALREADY_RUNNING);
+		SendMessage(hAxionWindow,WM_COMMAND,IDM_NETWORKS,NULL);
         exit(1);
     }
 
@@ -283,7 +344,8 @@ int WINAPI _tWinMain (HINSTANCE hThisInstance,
 
 	// Initialize WinSparkle as soon as the app itself is initialized, right
 // before entering the event loop:
-	win_sparkle_set_appcast_url("http://winsparkle.org/example/appcast.xml");
+	//win_sparkle_set_appcast_url("http://winsparkle.org/example/appcast.xml");
+	win_sparkle_set_appcast_url("http://axionvpn.com/appcastwin.xml");
 	win_sparkle_init();
 
 	//Manually set the details so we can specify 32 or 64 bit
@@ -291,19 +353,10 @@ int WINAPI _tWinMain (HINSTANCE hThisInstance,
 	WCHAR toolName[32]={0};
 	WCHAR version[32]={0};
 
-	if(isWin64()){
 
-	  wsprintf(toolName,L"AxionVPN64.exe");
-	}else{
-		wsprintf(toolName,L"AxionVPN32.exe");
-	}
-	  PrintDebug(toolName);
-	 wsprintf(version,L"%S",PACKAGE_VERSION);
-	 PrintDebug(version);
+    wsprintf(version,L"%S",PACKAGE_VERSION);
 
-
-
-	win_sparkle_set_app_details(L"Axion",toolName,version);
+	win_sparkle_set_app_details(L"Axion",L"AxionVPN.exe",version);
 
 	win_sparkle_set_update_check_interval(3600 * 24);
     win_sparkle_set_automatic_check_for_updates(1);
@@ -385,7 +438,7 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
   switch (message) {
     case WM_CREATE: 
 
-		PrintDebug(_T("[WindowsProcedure] got WM_CREATE"));
+		//PrintDebug(_T("[WindowsProcedure] got WM_CREATE"));
 
       /* Save Window Handle */
       o.hWnd = hwnd;
@@ -446,12 +499,8 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
 
 	  if (LOWORD(wParam) == IDM_NETWORKS) {
 
-		  
-		 // ShowWindow(hNetworksWindow, 1);
-		//  UpdateWindow(hNetworksWindow);
-
 		  ShowNetworksDialog();
-		  PrintDebug(_T("Networks Called"));
+		  //PrintDebug(_T("Networks Called"));
 	  }
 
 
@@ -460,7 +509,7 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
       }
 
       if (LOWORD(wParam) == IDM_CLOSE) {
-		 PrintDebug(_T("[WindowsProcedure] got IDM_CLOSE"));
+		 //PrintDebug(_T("[WindowsProcedure] got IDM_CLOSE"));
         CloseApplication(hwnd);
       }
       if (LOWORD(wParam) == IDM_SERVICE_START) {
@@ -473,13 +522,13 @@ LRESULT CALLBACK WindowProcedure (HWND hwnd, UINT message, WPARAM wParam, LPARAM
       break;
 	    
 	//case WM_MINIMIZE:
-	 // PrintDebug(_T("[WindowsProcedure] got WM_MINIMIZE"));
+	 // //PrintDebug(_T("[WindowsProcedure] got WM_MINIMIZE"));
       //CloseApplication(hwnd);
       //break;
 
 
     case WM_CLOSE:
-	  PrintDebug(_T("[WindowsProcedure] got WM_CLOSE"));
+	  //PrintDebug(_T("[WindowsProcedure] got WM_CLOSE"));
       CloseApplication(hwnd);
       break;
 
@@ -647,9 +696,9 @@ CloseApplication(HWND hwnd)
         if (o.conn[i].state == disconnected)
             continue;
 
-        /* Ask for confirmation if still connected */
-        if (ShowLocalizedMsgEx(MB_YESNO, _T("Exit AxionVPN"), IDS_NFO_ACTIVE_CONN_EXIT) == IDNO)
-            return;
+		//Explicitly close the connection
+		StopOpenVPN(o.conn);
+ 
     }
 
 	WipeFileList();
@@ -697,7 +746,7 @@ void PrintErrorDebug(TCHAR *msg)
           NULL ))
     {
       /* FormatMessage failed! */
-      PrintDebug(_T("FormatMessage() failed. %s "), msg);
+      //PrintDebug(_T("FormatMessage() failed. %s "), msg);
       return;
     }
 
@@ -705,7 +754,7 @@ void PrintErrorDebug(TCHAR *msg)
   buf = (TCHAR *)lpMsgBuf;
   buf[_tcslen(buf) - 3] = '\0';
 
-  PrintDebug(_T("%s %s"), msg, (LPCTSTR)lpMsgBuf);
+  //PrintDebug(_T("%s %s"), msg, (LPCTSTR)lpMsgBuf);
 
   LocalFree(lpMsgBuf);
 
